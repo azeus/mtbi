@@ -1,0 +1,7 @@
+streamlit
+weaviate-client
+llama-index
+llama-index-vector-stores-weaviate
+llama-index-llms-openai
+openai
+python-dotenv
