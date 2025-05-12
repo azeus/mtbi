@@ -5,7 +5,7 @@ from weaviate_connection import get_weaviate_client
 from schema_setup import create_mbti_schema
 from data_import import initialize_data
 from mbti_chat import MBTIMultiChat
-from utils import get_type_nickname, get_type_description, get_type_cognitive_functions
+from utils import get_type_nickname, get_type_description, get_type_cognitive
 
 # Page configuration
 st.set_page_config(
