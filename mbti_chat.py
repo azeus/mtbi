@@ -1,5 +1,5 @@
 # mbti_chat.py
-# Implements the MBTIMultiChat class using OpenAI and LlamaIndex
+# Fixed import issues with LlamaIndex
 
 import os
 import streamlit as st
@@ -8,18 +8,27 @@ import random
 
 # Import LlamaIndex components
 try:
+    # First try to import necessary types for type hints
+    from typing import TYPE_CHECKING
+
+    if TYPE_CHECKING:
+        from llama_index.core.retrievers import BaseRetriever
+
+    # Import the actual components
     from llama_index.core import StorageContext, load_index_from_storage
     from llama_index.vector_stores.weaviate import WeaviateVectorStore
     from llama_index.core.schema import NodeWithScore, TextNode
     from llama_index.core.retrievers import VectorIndexRetriever
+    from llama_index.core.retrievers.base import BaseRetriever  # Fixed import
     from llama_index.llms.openai import OpenAI
     from llama_index.core.query_engine import RetrieverQueryEngine
     from llama_index.core.response_synthesizers import ResponseSynthesizer
-    from llama_index.core.retrievers import BaseRetriever
     from llama_index.core.indices.vector_store import VectorStoreIndex
 
     LLAMA_INDEX_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    if st.session_state.get('debug_mode', False):
+        st.sidebar.warning(f"LlamaIndex import error: {str(e)}")
     LLAMA_INDEX_AVAILABLE = False
 
 
@@ -89,7 +98,7 @@ class MBTIMultiChat:
                 import traceback
                 st.sidebar.error(traceback.format_exc())
 
-    def _get_mbti_retriever(self, mbti_type: str) -> Optional[BaseRetriever]:
+    def _get_mbti_retriever(self, mbti_type: str):
         """
         Create a retriever for a specific MBTI type.
 
