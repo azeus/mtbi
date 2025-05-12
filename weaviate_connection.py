@@ -1,3 +1,5 @@
+# weaviate_connection.py
+
 import os
 import streamlit as st
 from dotenv import load_dotenv
@@ -9,11 +11,7 @@ load_dotenv()
 def get_weaviate_client():
     """
     Create and return a connection to your Weaviate cluster.
-    Uses Streamlit secrets or environment variables for credentials.
-    Works with both Weaviate v3.x and v4.x client libraries.
-
-    Returns:
-        A Weaviate client instance connected to your cluster.
+    Compatible with both Weaviate v3.x and v4.x.
     """
     try:
         # Get credentials (first try Streamlit secrets, then environment variables)
@@ -30,47 +28,18 @@ def get_weaviate_client():
         # Validate required credentials
         if not weaviate_url or not weaviate_api_key:
             st.error("Missing Weaviate credentials. Please set WEAVIATE_URL and WEAVIATE_API_KEY.")
-            st.stop()
+            return None
 
         if not openai_api_key:
             st.error("Missing OpenAI API key. Please set OPENAI_API_KEY.")
-            st.stop()
+            return None
 
-        # Import weaviate and try to detect version
+        # Import weaviate
         import weaviate
+        from weaviate.auth import AuthApiKey
 
-        # Check for Weaviate v4.x (has the WeaviateClient class)
-        if hasattr(weaviate, 'WeaviateClient'):
-            from weaviate import WeaviateClient
-            from weaviate.auth import AuthApiKey
-
-            # New Weaviate client v4.x
-            st.info("Using Weaviate Client v4.x")
-            client = WeaviateClient(
-                connection_params=weaviate.connect.ConnectionParams.from_url(
-                    url=weaviate_url,
-                    auth_credentials=AuthApiKey(api_key=weaviate_api_key),
-                    headers={
-                        "X-OpenAI-Api-Key": openai_api_key
-                    }
-                )
-            )
-
-            # Test connection
-            try:
-                client.collections.list()
-                st.success("Connected to Weaviate")
-                return client
-            except Exception as e:
-                st.error(f"Error connecting to Weaviate v4.x: {str(e)}")
-                st.stop()
-
-        # Older Weaviate v3.x client
-        else:
-            from weaviate.auth import AuthApiKey
-
-            st.info("Using Weaviate Client v3.x")
-
+        # Initialize client using v3.x API which is more compatible with LlamaIndex
+        try:
             # Create authentication object
             auth_config = AuthApiKey(api_key=weaviate_api_key)
 
@@ -87,16 +56,20 @@ def get_weaviate_client():
             )
 
             # Verify connection
-            if not client.is_ready():
-                st.error("Could not connect to Weaviate v3.x. Please check your credentials and network.")
-                st.stop()
+            if client.is_ready():
+                st.success("Connected to Weaviate successfully!")
+                return client
+            else:
+                st.error("Could not connect to Weaviate. Please check your credentials and network.")
+                return None
 
-            st.success("Connected to Weaviate")
-            return client
+        except Exception as e:
+            st.error(f"Error connecting to Weaviate: {str(e)}")
+            return None
 
     except ImportError:
-        st.error("Weaviate client library not installed. Please run: pip install weaviate-client")
-        st.stop()
+        st.error("Weaviate client library not installed. Please run: pip install weaviate-client==3.26.7")
+        return None
     except Exception as e:
         st.error(f"Error connecting to Weaviate: {str(e)}")
-        st.stop()
+        return None

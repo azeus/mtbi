@@ -1,3 +1,22 @@
+# utils.py
+
+# MBTI type data
+MBTI_TYPES = [
+    "INTJ", "INTP", "ENTJ", "ENTP",
+    "INFJ", "INFP", "ENFJ", "ENFP",
+    "ISTJ", "ISFJ", "ESTJ", "ESFJ",
+    "ISTP", "ISFP", "ESTP", "ESFP"
+]
+
+# Map MBTI types to emoji avatars
+MBTI_AVATARS = {
+    "INTJ": "🧠", "INTP": "🔬", "ENTJ": "👑", "ENTP": "💡",
+    "INFJ": "🔮", "INFP": "🌈", "ENFJ": "🌟", "ENFP": "✨",
+    "ISTJ": "📊", "ISFJ": "🏡", "ESTJ": "📝", "ESFJ": "🤝",
+    "ISTP": "🛠️", "ISFP": "🎨", "ESTP": "🏄", "ESFP": "🎭"
+}
+
+
 def get_type_nickname(mbti_type):
     """Get the nickname for an MBTI type."""
     nicknames = {
@@ -19,6 +38,7 @@ def get_type_nickname(mbti_type):
         "ESFP": "The Entertainer"
     }
     return nicknames.get(mbti_type, "")
+
 
 def get_type_description(mbti_type):
     """Get a short description for an MBTI type."""
@@ -42,6 +62,7 @@ def get_type_description(mbti_type):
     }
     return descriptions.get(mbti_type, "")
 
+
 def get_type_cognitive_functions(mbti_type):
     """Get the cognitive functions for an MBTI type."""
     functions = {
@@ -63,3 +84,31 @@ def get_type_cognitive_functions(mbti_type):
         "ESFP": "Se-Fi-Te-Ni (Extraverted Sensing, Introverted Feeling, Extraverted Thinking, Introverted Intuition)"
     }
     return functions.get(mbti_type, "")
+
+
+def simulate_mbti_response(mbti_type, user_query):
+    """
+    Simulate a response from a specific MBTI type.
+    This is a simplified mock function for when the LLM integration is not available.
+    """
+    # Simple responses based on MBTI type
+    responses = {
+        "INTJ": f"As an architect, I see this from a strategic perspective. {user_query}? This requires careful analysis of systems and long-term implications.",
+        "INTP": f"Interesting question about '{user_query}'. Let me analyze the logical framework behind this concept...",
+        "ENTJ": f"Let's address '{user_query}' efficiently. Here's my executive assessment and plan of action...",
+        "ENTP": f"'{user_query}'? That's a fascinating topic with multiple possibilities! Have you considered these perspectives?",
+        "INFJ": f"I sense there's deeper meaning behind your question about '{user_query}'. Let me share my insights...",
+        "INFP": f"Your question about '{user_query}' resonates with my values. Here's my authentic perspective...",
+        "ENFJ": f"I appreciate you asking about '{user_query}'. Let me guide you through my thoughts while considering how this impacts everyone...",
+        "ENFP": f"Oh, '{user_query}'! That opens up so many exciting possibilities! Let's explore this together!",
+        "ISTJ": f"Regarding '{user_query}', here are the concrete facts and reliable information based on experience...",
+        "ISFJ": f"I care about how '{user_query}' affects people. Based on what's worked before, here's my thoughtful response...",
+        "ESTJ": f"Let's be practical about '{user_query}'. The most efficient approach based on established procedures is...",
+        "ESFJ": f"I want to help with your question about '{user_query}'. Here's what will work best for everyone involved...",
+        "ISTP": f"Let me troubleshoot '{user_query}' by breaking it down into its practical components...",
+        "ISFP": f"'{user_query}' makes me feel... Here's my personal, in-the-moment response that feels right...",
+        "ESTP": f"Let's take action on '{user_query}'! Here's my straightforward, pragmatic approach based on what's happening now...",
+        "ESFP": f"'{user_query}'? How fun! Here's my enthusiastic take that brings energy to this conversation..."
+    }
+
+    return responses.get(mbti_type, f"Thinking about {user_query}...")

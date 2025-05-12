@@ -1,16 +1,10 @@
+# data_import.py
+
 import uuid
 import streamlit as st
-from openai import OpenAI
 import os
 from weaviate_connection import get_weaviate_client
-
-# MBTI types
-MBTI_TYPES = [
-    "INTJ", "INTP", "ENTJ", "ENTP",
-    "INFJ", "INFP", "ENFJ", "ENFP",
-    "ISTJ", "ISFJ", "ESTJ", "ESFJ",
-    "ISTP", "ISFP", "ESTP", "ESFP"
-]
+from utils import MBTI_TYPES
 
 # Categories of MBTI information
 CATEGORIES = [
@@ -23,9 +17,9 @@ CATEGORIES = [
 ]
 
 
-def generate_synthetic_data(client):
+def generate_mbti_data(client):
     """
-    Generate synthetic MBTI data using OpenAI's API and import to Weaviate.
+    Generate MBTI data using OpenAI and store it in Weaviate.
     """
     # Get the OpenAI API key
     if hasattr(st, 'secrets') and 'OPENAI_API_KEY' in st.secrets:
@@ -34,16 +28,19 @@ def generate_synthetic_data(client):
         openai_api_key = os.getenv("OPENAI_API_KEY")
 
     if not openai_api_key:
-        st.error("OpenAI API key is required to generate synthetic data.")
+        st.error("OpenAI API key is required to generate data.")
         return False
 
     # Initialize OpenAI client
-    openai_client = OpenAI(api_key=openai_api_key)
+    try:
+        from openai import OpenAI
+        openai_client = OpenAI(api_key=openai_api_key)
+    except ImportError:
+        st.error("OpenAI package not installed. Please run: pip install openai")
+        return False
 
-    progress_bar = None
-    if hasattr(st, 'progress'):
-        progress_bar = st.progress(0)
-        progress_text = st.empty()
+    progress_bar = st.progress(0)
+    status_text = st.empty()
 
     total_items = len(MBTI_TYPES) * len(CATEGORIES)
     completed = 0
@@ -53,36 +50,37 @@ def generate_synthetic_data(client):
 
         for mbti_type in MBTI_TYPES:
             for category in CATEGORIES:
-                if progress_bar:
-                    progress_text.text(f"Generating data for {mbti_type} - {category}...")
+                status_text.text(f"Generating data for {mbti_type} - {category}...")
 
                 # Check if data already exists
-                result = client.query.get(
-                    "MBTIPersonality",
-                    ["content"]
-                ).with_where({
-                    "operator": "And",
-                    "operands": [
-                        {
-                            "path": ["type"],
-                            "operator": "Equal",
-                            "valueString": mbti_type
-                        },
-                        {
-                            "path": ["category"],
-                            "operator": "Equal",
-                            "valueString": category
-                        }
-                    ]
-                }).do()
+                try:
+                    result = client.query.get(
+                        "MBTIPersonality",
+                        ["content"]
+                    ).with_where({
+                        "operator": "And",
+                        "operands": [
+                            {
+                                "path": ["type"],
+                                "operator": "Equal",
+                                "valueString": mbti_type
+                            },
+                            {
+                                "path": ["category"],
+                                "operator": "Equal",
+                                "valueString": category
+                            }
+                        ]
+                    }).do()
 
-                # Skip if data already exists
-                if result.get('data', {}).get('Get', {}).get('MBTIPersonality', []):
-                    print(f"Data already exists for {mbti_type} - {category}, skipping...")
-                    completed += 1
-                    if progress_bar:
+                    # Skip if data already exists
+                    if result.get('data', {}).get('Get', {}).get('MBTIPersonality', []):
+                        st.info(f"Data already exists for {mbti_type} - {category}, skipping...")
+                        completed += 1
                         progress_bar.progress(completed / total_items)
-                    continue
+                        continue
+                except:
+                    pass  # Continue if query fails
 
                 prompt = f"""
                 Create a detailed description of the {mbti_type} personality type's {category.replace('_', ' ')}.
@@ -116,18 +114,16 @@ def generate_synthetic_data(client):
                         uuid=uuid.uuid4()
                     )
 
-                    print(f"Generated and added: {mbti_type} - {category}")
+                    st.success(f"Generated and added: {mbti_type} - {category}")
 
                 except Exception as e:
-                    print(f"Error generating content for {mbti_type} - {category}: {e}")
+                    st.error(f"Error generating content for {mbti_type} - {category}: {e}")
 
                 completed += 1
-                if progress_bar:
-                    progress_bar.progress(completed / total_items)
+                progress_bar.progress(completed / total_items)
 
-    if progress_bar:
-        progress_bar.progress(1.0)
-        progress_text.text("Data generation complete!")
+    progress_bar.progress(1.0)
+    status_text.text("Data generation complete!")
 
     return True
 
@@ -155,14 +151,16 @@ def initialize_data():
     Initialize the MBTI data in Weaviate if it doesn't exist.
     """
     client = get_weaviate_client()
+    if client is None:
+        return False
 
     # Check if data exists
     if check_data_exists(client):
-        print("MBTI data already exists in the database")
+        st.info("MBTI data already exists in the database")
         return True
 
-    # Generate synthetic data
-    return generate_synthetic_data(client)
+    # Generate data
+    return generate_mbti_data(client)
 
 
 if __name__ == "__main__":
