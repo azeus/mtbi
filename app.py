@@ -5,7 +5,7 @@ from weaviate_connection import get_weaviate_client
 from schema_setup import create_mbti_schema
 from data_import import initialize_data
 from mbti_chat import MBTIMultiChat
-from utils import get_type_nickname, get_type_description, get_type_cognitive
+from utils import get_type_nickname, get_type_description, get_type_cognitive_functions
 
 # Page configuration
 st.set_page_config(
@@ -127,45 +127,45 @@ elif chat_mode == "Multi-Personality Chat":
             format_func=lambda x: f"{x} - {get_type_nickname(x)}"
         )
 
-        # Display chat history
-        for message in st.session_state.chat_history:
-            if "user" in message:
-                st.chat_message("user").write(message["user"])
+    # Display chat history
+    for message in st.session_state.chat_history:
+        if "user" in message:
+            st.chat_message("user").write(message["user"])
 
-            if "response" in message:
-                for mbti_type, resp in message["response"].items():
-                    with st.chat_message("assistant", avatar=f"{mbti_type}"):
-                        st.write(f"**{mbti_type}** - {get_type_nickname(mbti_type)}: {resp}")
-
-        # User input
-        user_input = st.chat_input("Ask something...")
-
-        if user_input:
-            # Add user message
-            st.chat_message("user").write(user_input)
-
-            # Get responses from multiple personalities
-            with st.spinner("Multiple personalities are responding..."):
-                if selected_types:
-                    responses = st.session_state.mbti_chat.multi_chat(
-                        user_input,
-                        types_to_include=selected_types
-                    )
-                else:
-                    responses = st.session_state.mbti_chat.multi_chat(
-                        user_input,
-                        num_types=num_personalities
-                    )
-
-            # Display responses
-            for mbti_type, response in responses.items():
+        if "response" in message:
+            for mbti_type, resp in message["response"].items():
                 with st.chat_message("assistant", avatar=f"{mbti_type}"):
-                    st.write(f"**{mbti_type}** - {get_type_nickname(mbti_type)}: {response}")
+                    st.write(f"**{mbti_type}** - {get_type_nickname(mbti_type)}: {resp}")
 
-            # Force a rerun to update the display
-            st.experimental_rerun()
+    # User input
+    user_input = st.chat_input("Ask something...")
 
-    elif chat_mode == "Group Discussion":
+    if user_input:
+        # Add user message
+        st.chat_message("user").write(user_input)
+
+        # Get responses from multiple personalities
+        with st.spinner("Multiple personalities are responding..."):
+            if selected_types:
+                responses = st.session_state.mbti_chat.multi_chat(
+                    user_input,
+                    types_to_include=selected_types
+                )
+            else:
+                responses = st.session_state.mbti_chat.multi_chat(
+                    user_input,
+                    num_types=num_personalities
+                )
+
+        # Display responses
+        for mbti_type, response in responses.items():
+            with st.chat_message("assistant", avatar=f"{mbti_type}"):
+                st.write(f"**{mbti_type}** - {get_type_nickname(mbti_type)}: {response}")
+
+        # Force a rerun to update the display
+        st.experimental_rerun()
+
+elif chat_mode == "Group Discussion":
     st.subheader("MBTI Group Discussion")
 
     # Discussion settings
