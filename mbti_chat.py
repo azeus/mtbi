@@ -1,364 +1,174 @@
-# app.py
+# mbti_chat.py
 
-import streamlit as st
 import random
-import time
-from utils import MBTI_TYPES, MBTI_AVATARS, get_type_nickname, get_type_description, get_type_cognitive_functions, \
-    simulate_mbti_response
-
-# Optional imports - will be used if files exist
-try:
-    from weaviate_connection import get_weaviate_client
-    from schema_setup import create_mbti_schema
-    from data_import import initialize_data
-    from mbti_chat import MBTIMultiChat
-
-    ADVANCED_MODE = True
-except ImportError:
-    ADVANCED_MODE = False
-
-# Page configuration
-st.set_page_config(
-    page_title="MBTI Multi-Personality Chat",
-    page_icon="🧠",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# App title and description
-st.title("MBTI Multi-Personality Chat System")
-st.markdown("""
-This application allows you to chat with different Myers-Briggs Type Indicator (MBTI) personalities. 
-Experience how different personality types might respond to the same questions!
-""")
-
-# Initialize session state
-if 'chat_initialized' not in st.session_state:
-    st.session_state.chat_initialized = False
-
-if 'chat_history' not in st.session_state:
-    st.session_state.chat_history = []
-
-if 'current_discussion' not in st.session_state:
-    st.session_state.current_discussion = None
+import os
+import streamlit as st
+from weaviate_connection import get_weaviate_client
+from utils import MBTI_TYPES, get_type_nickname, simulate_mbti_response
 
 
-# Setup and initialization
-def initialize_app():
-    if ADVANCED_MODE:
-        with st.spinner("Setting up Weaviate connection..."):
-            client = get_weaviate_client()
-
-        if client is not None:
-            with st.spinner("Setting up database schema..."):
-                create_mbti_schema()
-
-            with st.spinner("Initializing MBTI data..."):
-                initialize_data()
-
-            with st.spinner("Setting up chat system..."):
-                st.session_state.mbti_chat = MBTIMultiChat(client)
-                st.session_state.chat_initialized = True
-
-            st.success("Setup complete! You can now chat with MBTI personalities.")
+def initialize_llama_index():
+    try:
+        if hasattr(st, 'secrets') and 'OPENAI_API_KEY' in st.secrets:
+            openai_api_key = st.secrets['OPENAI_API_KEY']
         else:
-            st.warning("Weaviate connection failed. Using simulation mode instead.")
-            st.session_state.mbti_chat = None
-            st.session_state.chat_initialized = True
-    else:
-        st.info("Running in simulation mode (no Weaviate/LlamaIndex)")
-        st.session_state.mbti_chat = None
-        st.session_state.chat_initialized = True
+            openai_api_key = os.getenv("OPENAI_API_KEY")
+
+        if not openai_api_key:
+            st.warning("OpenAI API key is required.")
+            return None, None
+
+        # ✅ Updated imports for LlamaIndex 0.8.34+
+        from llama_index.core import VectorStoreIndex, StorageContext, PromptTemplate
+        from llama_index.core.readers import SimpleDirectoryReader
+        from llama_index.vector_stores.weaviate import WeaviateVectorStore
+        from llama_index.llms.openai import OpenAI
+
+        # Get Weaviate client
+        client = get_weaviate_client()
+        if client is None:
+            return None, None
+
+        # Vector store
+        vector_store = WeaviateVectorStore(
+            weaviate_client=client,
+            index_name="MBTIPersonality",
+            text_key="content"
+        )
+
+        storage_context = StorageContext.from_defaults(vector_store=vector_store)
+
+        index = VectorStoreIndex.from_vector_store(
+            vector_store=vector_store,
+            storage_context=storage_context
+        )
+
+        return client, index
+
+    except Exception as e:
+        st.error(f"Error initializing LlamaIndex: {str(e)}")
+        return None, None
 
 
-# Initialize the app if not already done
-if not st.session_state.chat_initialized:
-    initialize_app()
+class MBTIMultiChat:
+    def __init__(self, client=None):
+        self.mbti_types = MBTI_TYPES
+        self.conversation_history = []
+        self.use_llm = False
 
-# Sidebar options
-st.sidebar.image(
-    "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e9/Myers-Briggs_Type_Indicator.svg/1200px-Myers-Briggs_Type_Indicator.svg.png",
-    width=200)
-st.sidebar.header("Chat Options")
+        if client is None:
+            client, index = initialize_llama_index()
+        else:
+            _, index = initialize_llama_index()
 
-chat_mode = st.sidebar.radio(
-    "Select Chat Mode",
-    ["Single Personality", "Multi-Personality Chat", "Group Discussion"]
-)
+        self.client = client
+        self.index = index
 
-# Display connection status
-st.sidebar.markdown("---")
-if ADVANCED_MODE:
-    if hasattr(st, 'secrets') and 'WEAVIATE_URL' in st.secrets:
-        st.sidebar.success("✅ Credentials configured")
-    else:
-        st.sidebar.warning("⚠️ Weaviate credentials not configured")
-else:
-    st.sidebar.info("💡 Basic simulation mode active")
+        self.engines = {}
+        if self.client is not None and self.index is not None:
+            self.use_llm = True
+            for mbti_type in self.mbti_types:
+                self.engines[mbti_type] = self._create_query_engine(mbti_type)
+        else:
+            st.warning("Using simulated responses. LlamaIndex/Weaviate not available.")
 
+    def _create_query_engine(self, mbti_type):
+        try:
+            from llama_index.core.query_engine import QueryMode
+            from llama_index.core.prompts import PromptTemplate
 
-# Simple chat functions for when not using LlamaIndex/Weaviate
-def simple_chat_with_type(user_query, mbti_type):
-    response = simulate_mbti_response(mbti_type, user_query)
-    return response
+            mbti_filter = {"type": mbti_type}
 
+            template = (
+                f"You are a chatbot that embodies the {mbti_type} personality type from Myers-Briggs Type Indicator. "
+                f"Base your responses on the personality traits, communication style, and cognitive functions of the "
+                f"{mbti_type} type. Respond in first person as if you are someone with this personality type. "
+                f"Be authentic to how a {mbti_type} would communicate and think."
+            )
 
-def simple_multi_chat(user_query, types_to_include=None, num_types=3):
-    # Determine which types to include
-    if types_to_include:
-        selected_types = [t for t in types_to_include if t in MBTI_TYPES]
-        if not selected_types:
-            selected_types = random.sample(MBTI_TYPES, min(num_types, len(MBTI_TYPES)))
-    else:
-        selected_types = random.sample(MBTI_TYPES, min(num_types, len(MBTI_TYPES)))
+            query_engine = self.index.as_query_engine(
+                query_mode=QueryMode.DEFAULT,
+                filters=mbti_filter,
+                similarity_top_k=5,
+                response_mode="compact",
+                use_async=True,
+                text_qa_template=PromptTemplate(template),
+            )
 
-    # Get responses
-    responses = {}
-    for mbti_type in selected_types:
-        response = simple_chat_with_type(user_query, mbti_type)
-        responses[mbti_type] = response
+            return query_engine
 
-    return responses
+        except Exception as e:
+            st.error(f"Error creating query engine for {mbti_type}: {str(e)}")
+            return None
 
+    def chat_with_type(self, user_query, mbti_type):
+        if mbti_type not in self.mbti_types:
+            return f"Error: {mbti_type} is not a valid MBTI type"
 
-def simple_group_discussion(topic, participants=None, num_rounds=3):
-    if not participants:
-        participants = random.sample(MBTI_TYPES, min(4, len(MBTI_TYPES)))
+        if self.use_llm and mbti_type in self.engines:
+            try:
+                engine = self.engines[mbti_type]
+                response = engine.query(user_query)
+                response_text = str(response)
+            except Exception as e:
+                st.warning(f"Error using LLM for {mbti_type}: {str(e)}")
+                st.warning("Falling back to simulated response.")
+                response_text = simulate_mbti_response(mbti_type, user_query)
+        else:
+            response_text = simulate_mbti_response(mbti_type, user_query)
 
-    discussion = [f"Group discussion on: {topic}\nParticipants: {', '.join(participants)}"]
+        entry = {"user": user_query, "response": {mbti_type: response_text}}
+        self.conversation_history.append(entry)
 
-    # First round - everyone responds to the topic
-    round_responses = {}
-    for mbti_type in participants:
-        response = simple_chat_with_type(topic, mbti_type)
-        round_responses[mbti_type] = response
-        discussion.append(f"{mbti_type}: {response}")
+        return response_text
 
-    # Additional rounds - respond to others
-    for round_num in range(2, num_rounds + 1):
-        new_responses = {}
+    def multi_chat(self, user_query, types_to_include=None, num_types=3):
+        if types_to_include:
+            selected_types = [t for t in types_to_include if t in self.mbti_types]
+            if not selected_types:
+                selected_types = random.sample(self.mbti_types, min(num_types, len(self.mbti_types)))
+        else:
+            selected_types = random.sample(self.mbti_types, min(num_types, len(self.mbti_types)))
 
+        responses = {}
+        for mbti_type in selected_types:
+            response = self.chat_with_type(user_query, mbti_type)
+            responses[mbti_type] = response
+
+        return responses
+
+    def group_discussion(self, topic, participants=None, num_rounds=3):
+        if not participants:
+            participants = random.sample(self.mbti_types, min(4, len(self.mbti_types)))
+
+        discussion = [f"Group discussion on: {topic}\nParticipants: {', '.join(participants)}"]
+
+        round_responses = {}
         for mbti_type in participants:
-            # Create context from previous responses
-            context = "\n".join([
-                f"{other_type}: {round_responses[other_type]}"
-                for other_type in participants if other_type != mbti_type
-            ])
+            response = self.chat_with_type(topic, mbti_type)
+            round_responses[mbti_type] = response
+            discussion.append(f"{mbti_type}: {response}")
 
-            prompt = f"Topic: {topic}\n\nOthers' comments:\n{context}"
-            response = simple_chat_with_type(prompt, mbti_type)
-            new_responses[mbti_type] = response
-            discussion.append(f"{mbti_type} (Round {round_num}): {response}")
+        for round_num in range(2, num_rounds + 1):
+            new_responses = {}
 
-        round_responses = new_responses
+            for mbti_type in participants:
+                context = "\n".join([
+                    f"{other_type}: {round_responses[other_type]}"
+                    for other_type in participants if other_type != mbti_type
+                ])
 
-    return discussion
+                prompt = f"""Topic: {topic}
 
+Here are the comments from others in our discussion:
+{context}
 
-# Different UI based on selected mode
-if chat_mode == "Single Personality":
-    # MBTI type selection outside of columns
-    selected_type = st.selectbox(
-        "Select MBTI Type",
-        MBTI_TYPES,
-        format_func=lambda x: f"{x} - {get_type_nickname(x)}"
-    )
+How would you respond to these perspectives?"""
 
-    # Information about selected type
-    st.info(get_type_description(selected_type))
-    st.caption(f"**Cognitive Functions**: {get_type_cognitive_functions(selected_type)}")
+                response = self.chat_with_type(prompt, mbti_type)
+                new_responses[mbti_type] = response
+                discussion.append(f"{mbti_type} (Round {round_num}): {response}")
 
-    # Chat interface
-    st.subheader(f"Chatting with {selected_type} ({get_type_nickname(selected_type)})")
+            round_responses = new_responses
 
-    # Display chat history
-    for message in st.session_state.chat_history:
-        if "user" in message:
-            st.chat_message("user").write(message["user"])
-
-        if "response" in message and selected_type in message["response"]:
-            with st.chat_message("assistant", avatar=MBTI_AVATARS[selected_type]):
-                st.write(message["response"][selected_type])
-
-    # User input - must be outside of columns
-    user_input = st.chat_input("Ask something...")
-
-    if user_input:
-        # Add user message to history
-        if not st.session_state.chat_history or "user" not in st.session_state.chat_history[-1]:
-            st.session_state.chat_history.append({"user": user_input})
-
-        # Display user message
-        st.chat_message("user").write(user_input)
-
-        # Generate response
-        with st.spinner(f"{selected_type} is thinking..."):
-            if st.session_state.mbti_chat is not None:
-                response = st.session_state.mbti_chat.chat_with_type(user_input, selected_type)
-            else:
-                response = simple_chat_with_type(user_input, selected_type)
-
-        # Add response to history
-        st.session_state.chat_history.append({"response": {selected_type: response}})
-
-        # Display response
-        with st.chat_message("assistant", avatar=MBTI_AVATARS[selected_type]):
-            st.write(response)
-
-        # Force a rerun to update the display
-        st.experimental_rerun()
-
-elif chat_mode == "Multi-Personality Chat":
-    # Multi-chat interface
-    st.subheader("Multi-Personality Chat")
-
-    # Settings
-    num_personalities = st.slider("Number of personalities", 2, 8, 3)
-    selected_types = st.multiselect(
-        "Select specific types (optional)",
-        MBTI_TYPES,
-        format_func=lambda x: f"{x} - {get_type_nickname(x)}"
-    )
-
-    # Display chat history
-    for message in st.session_state.chat_history:
-        if "user" in message:
-            st.chat_message("user").write(message["user"])
-
-        if "response" in message and isinstance(message["response"], dict):
-            for mbti_type, resp in message["response"].items():
-                with st.chat_message("assistant", avatar=MBTI_AVATARS[mbti_type]):
-                    st.write(f"**{mbti_type}** - {get_type_nickname(mbti_type)}: {resp}")
-
-    # User input - must be outside of any container
-    user_input = st.chat_input("Ask something...")
-
-    if user_input:
-        # Add user message
-        if not st.session_state.chat_history or "user" not in st.session_state.chat_history[-1]:
-            st.session_state.chat_history.append({"user": user_input})
-
-        # Display user message
-        st.chat_message("user").write(user_input)
-
-        # Get responses from multiple personalities
-        with st.spinner("Multiple personalities are responding..."):
-            if st.session_state.mbti_chat is not None:
-                responses = st.session_state.mbti_chat.multi_chat(
-                    user_input,
-                    types_to_include=selected_types if selected_types else None,
-                    num_types=num_personalities
-                )
-            else:
-                responses = simple_multi_chat(
-                    user_input,
-                    types_to_include=selected_types if selected_types else None,
-                    num_types=num_personalities
-                )
-
-        # Add responses to history
-        st.session_state.chat_history.append({"response": responses})
-
-        # Display responses
-        for mbti_type, response in responses.items():
-            with st.chat_message("assistant", avatar=MBTI_AVATARS[mbti_type]):
-                st.write(f"**{mbti_type}** - {get_type_nickname(mbti_type)}: {response}")
-
-        # Force a rerun to update the display
-        st.experimental_rerun()
-
-elif chat_mode == "Group Discussion":
-    st.subheader("MBTI Group Discussion")
-
-    # Discussion settings
-    topic = st.text_input("Discussion Topic", "The future of artificial intelligence")
-    num_participants = st.slider("Number of participants", 2, 8, 4)
-    selected_participants = st.multiselect(
-        "Select specific participants (optional)",
-        MBTI_TYPES,
-        format_func=lambda x: f"{x} - {get_type_nickname(x)}"
-    )
-    num_rounds = st.slider("Discussion rounds", 1, 5, 3)
-
-    # Start discussion button
-    if st.button("Start New Discussion"):
-        if not topic:
-            st.error("Please enter a discussion topic")
-        else:
-            with st.spinner("Discussion in progress... This may take a minute."):
-                # Select participants
-                participants = selected_participants if selected_participants else random.sample(MBTI_TYPES,
-                                                                                                 num_participants)
-
-                # Generate discussion
-                if st.session_state.mbti_chat is not None:
-                    discussion = st.session_state.mbti_chat.group_discussion(
-                        topic,
-                        participants,
-                        num_rounds
-                    )
-                else:
-                    discussion = simple_group_discussion(
-                        topic,
-                        participants,
-                        num_rounds
-                    )
-
-                # Store in session state
-                st.session_state.current_discussion = discussion
-
-            # Force a rerun to update the display
-            st.experimental_rerun()
-
-    # Display current discussion
-    if st.session_state.current_discussion:
-        st.info(st.session_state.current_discussion[0])
-
-        for entry in st.session_state.current_discussion[1:]:
-            parts = entry.split(":", 1)
-            if len(parts) == 2:
-                mbti_part = parts[0].strip()
-                content = parts[1].strip()
-
-                # Extract just the MBTI type code
-                if "Round" in mbti_part:
-                    mbti_type = mbti_part.split()[0]
-                    round_info = mbti_part.split("(")[1].split(")")[0]
-                    with st.chat_message("assistant", avatar=MBTI_AVATARS[mbti_type]):
-                        st.write(f"**{mbti_type}** - {get_type_nickname(mbti_type)} ({round_info}): {content}")
-                else:
-                    mbti_type = mbti_part
-                    with st.chat_message("assistant", avatar=MBTI_AVATARS[mbti_type]):
-                        st.write(f"**{mbti_type}** - {get_type_nickname(mbti_type)}: {content}")
-
-# Add a footer
-st.markdown("---")
-st.markdown(
-    """
-    <div style="text-align: center">
-        <p>Created with ❤️ using Streamlit</p>
-        <p>MBTI personalities are simulated for educational purposes</p>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
-
-# Show a note about the mode
-st.sidebar.markdown("---")
-if st.session_state.mbti_chat is not None and hasattr(st.session_state.mbti_chat,
-                                                      'use_llm') and st.session_state.mbti_chat.use_llm:
-    st.sidebar.success("""
-    **Advanced Mode Active**
-    Using:
-    - Weaviate vector database
-    - LlamaIndex for retrieval
-    - OpenAI for natural responses
-    """)
-else:
-    st.sidebar.info("""
-    **Simulation Mode Active**
-    The full version would use:
-    - Weaviate vector database
-    - LlamaIndex for retrieval
-    - OpenAI for natural responses
-    """)
+        return discussion
