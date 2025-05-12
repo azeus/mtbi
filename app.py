@@ -1,6 +1,12 @@
 # app.py
 
 import streamlit as st
+st.set_page_config(
+    page_title="MBTI Multi-Personality Chat",
+    page_icon="🧠",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 import random
 import time
 import os
@@ -9,23 +15,31 @@ from utils import MBTI_TYPES, MBTI_AVATARS, get_type_nickname, get_type_descript
 
 
 # Optional imports - will be used if files exist
+ADVANCED_MODE = False
+
 try:
     from weaviate_connection import get_weaviate_client
-    from schema_setup import create_mbti_schema
-    from data_import import initialize_data
-    from mbti_chat import MBTIMultiChat
+except ImportError as e:
+    st.warning(f"⚠️ Failed to import `weaviate_connection`: {e}")
+else:
+    try:
+        from schema_setup import create_mbti_schema
+    except ImportError as e:
+        st.warning(f"⚠️ Failed to import `schema_setup`: {e}")
+    else:
+        try:
+            from data_import import initialize_data
+        except ImportError as e:
+            st.warning(f"⚠️ Failed to import `data_import`: {e}")
+        else:
+            try:
+                from mbti_chat import MBTIMultiChat
+                ADVANCED_MODE = True
+                st.info("✅ Advanced mode activated.")
+            except ImportError as e:
+                st.warning(f"⚠️ Failed to import `mbti_chat`: {e}")
 
-    ADVANCED_MODE = True
-except ImportError:
-    ADVANCED_MODE = False
 
-# Page configuration
-st.set_page_config(
-    page_title="MBTI Multi-Personality Chat",
-    page_icon="🧠",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
 
 # App title and description
 st.title("MBTI Multi-Personality Chat System")
