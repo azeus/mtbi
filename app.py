@@ -146,7 +146,9 @@ with st.sidebar.expander("System Status", expanded=False):
                     openai_api_key = os.getenv("OPENAI_API_KEY")
 
                 if openai_api_key:
+                    # Only pass the API key, no other parameters
                     openai_client = OpenAI(api_key=openai_api_key)
+
                     response = openai_client.chat.completions.create(
                         model="gpt-3.5-turbo",
                         messages=[{"role": "user", "content": "test"}],

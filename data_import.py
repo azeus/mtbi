@@ -31,12 +31,19 @@ def generate_mbti_data(client):
         st.error("OpenAI API key is required to generate data.")
         return False
 
-    # Initialize OpenAI client
+    # Initialize OpenAI client - FIXED FOR MODERN CLIENT
     try:
         from openai import OpenAI
+        # Only pass the API key, no other parameters
         openai_client = OpenAI(api_key=openai_api_key)
+
+        if st.session_state.get('debug_mode', False):
+            st.sidebar.success("OpenAI client initialized successfully")
     except ImportError:
-        st.error("OpenAI package not installed. Please run: pip install openai")
+        st.error("OpenAI package not installed. Please run: pip install openai==1.3.0")
+        return False
+    except Exception as e:
+        st.error(f"Error initializing OpenAI client: {str(e)}")
         return False
 
     progress_bar = st.progress(0)
