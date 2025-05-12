@@ -6,6 +6,8 @@ import time
 import os
 from utils import MBTI_TYPES, MBTI_AVATARS, get_type_nickname, get_type_description, get_type_cognitive_functions, \
     simulate_mbti_response
+from diagnostics import run_comprehensive_diagnostics, display_diagnostics_results, show_setup_guide
+
 
 # Optional imports - will be used if files exist
 try:
@@ -477,3 +479,42 @@ else:
     - LlamaIndex for retrieval
     - OpenAI for natural responses
     """)
+
+with st.sidebar.expander("System Status", expanded=False):
+    if st.button("Run Comprehensive Diagnostics"):
+        with st.spinner("Running diagnostics... This may take a moment."):
+            diagnostics_results = run_comprehensive_diagnostics()
+            display_diagnostics_results(diagnostics_results)
+
+    if st.button("Setup Guide"):
+        show_setup_guide()
+
+    # Debug Mode Toggle
+    st.session_state.debug_mode = st.checkbox("Enable Debug Logs", value=st.session_state.debug_mode)
+
+    # Add direct credentials check
+    if st.button("Check Secrets"):
+        if hasattr(st, 'secrets'):
+            secrets_found = []
+            for key in ["WEAVIATE_URL", "WEAVIATE_API_KEY", "OPENAI_API_KEY"]:
+                if key in st.secrets:
+                    value = st.secrets[key]
+                    # Show first few characters of the value and mask the rest
+                    display_val = value[:6] + "..." if value else "Not set"
+                    secrets_found.append(f"{key}: {display_val}")
+
+            if secrets_found:
+                st.success("Secrets found:")
+                for secret in secrets_found:
+                    st.write(secret)
+            else:
+                st.error("No secrets found")
+
+            # Check if Weaviate URL has http/https prefix
+            if "WEAVIATE_URL" in st.secrets:
+                url = st.secrets["WEAVIATE_URL"]
+                if not url.startswith(("http://", "https://")):
+                    st.error(f"Weaviate URL missing http:// or https:// prefix: {url}")
+                    st.info(f"Fix: Use WEAVIATE_URL = \"https://{url}\" in secrets.toml")
+        else:
+            st.error("Streamlit secrets not available")
