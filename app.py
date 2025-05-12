@@ -1,6 +1,5 @@
 import streamlit as st
 import random
-import os
 
 # Page configuration
 st.set_page_config(
@@ -21,6 +20,9 @@ Experience how different personality types might respond to the same questions!
 if 'chat_history' not in st.session_state:
     st.session_state.chat_history = []
 
+if 'current_discussion' not in st.session_state:
+    st.session_state.current_discussion = None
+
 # Define MBTI types and functions
 MBTI_TYPES = [
     "INTJ", "INTP", "ENTJ", "ENTP",
@@ -28,6 +30,14 @@ MBTI_TYPES = [
     "ISTJ", "ISFJ", "ESTJ", "ESFJ",
     "ISTP", "ISFP", "ESTP", "ESFP"
 ]
+
+# Map MBTI types to emoji avatars
+MBTI_AVATARS = {
+    "INTJ": "🧠", "INTP": "🔬", "ENTJ": "👑", "ENTP": "💡",
+    "INFJ": "🔮", "INFP": "🌈", "ENFJ": "🌟", "ENFP": "✨",
+    "ISTJ": "📊", "ISFJ": "🏡", "ESTJ": "📝", "ESFJ": "🤝",
+    "ISTP": "🛠️", "ISFP": "🎨", "ESTP": "🏄", "ESFP": "🎭"
+}
 
 
 def get_type_nickname(mbti_type):
@@ -104,7 +114,7 @@ def simulate_mbti_response(mbti_type, user_query):
     Simulate a response from a specific MBTI type.
     This is a simplified mock function - in the full version, this would use LLM + Weaviate.
     """
-    # Simple responses based on MBTI type - in a real app, this would use OpenAI or similar
+    # Simple responses based on MBTI type
     responses = {
         "INTJ": f"As an architect, I see this from a strategic perspective. {user_query}? This requires careful analysis of systems and long-term implications.",
         "INTP": f"Interesting question about '{user_query}'. Let me analyze the logical framework behind this concept...",
@@ -147,71 +157,65 @@ else:
 
 # Different UI based on selected mode
 if chat_mode == "Single Personality":
-    col1, col2 = st.columns([1, 3])
+    # MBTI type selection outside of columns
+    selected_type = st.selectbox(
+        "Select MBTI Type",
+        MBTI_TYPES,
+        format_func=lambda x: f"{x} - {get_type_nickname(x)}"
+    )
 
-    with col1:
-        # MBTI type selection with brief descriptions
-        selected_type = st.selectbox(
-            "Select MBTI Type",
-            MBTI_TYPES,
-            format_func=lambda x: f"{x} - {get_type_nickname(x)}"
-        )
+    # Information about selected type
+    st.info(get_type_description(selected_type))
+    st.caption(f"**Cognitive Functions**: {get_type_cognitive_functions(selected_type)}")
 
-        st.info(get_type_description(selected_type))
-        st.caption(f"**Cognitive Functions**: {get_type_cognitive_functions(selected_type)}")
+    # Chat interface
+    st.subheader(f"Chatting with {selected_type} ({get_type_nickname(selected_type)})")
 
-    with col2:
-        # Chat interface
-        st.subheader(f"Chatting with {selected_type} ({get_type_nickname(selected_type)})")
+    # Display chat history
+    for message in st.session_state.chat_history:
+        if "user" in message:
+            st.chat_message("user").write(message["user"])
 
-        # Display chat history
-        for message in st.session_state.chat_history:
-            if "user" in message:
-                st.chat_message("user").write(message["user"])
+        if "response" in message and selected_type in message["response"]:
+            with st.chat_message("assistant", avatar=MBTI_AVATARS[selected_type]):
+                st.write(message["response"][selected_type])
 
-            if "response" in message and selected_type in message["response"]:
-                with st.chat_message("assistant", avatar=f"{selected_type}"):
-                    st.write(message["response"][selected_type])
+    # User input - must be outside of columns
+    user_input = st.chat_input("Ask something...")
 
-        # User input
-        user_input = st.chat_input("Ask something...")
+    if user_input:
+        # Add user message to history
+        if not st.session_state.chat_history or "user" not in st.session_state.chat_history[-1]:
+            st.session_state.chat_history.append({"user": user_input})
 
-        if user_input:
-            # Add user message to history
-            if "user" not in st.session_state.chat_history[-1] if st.session_state.chat_history else True:
-                st.session_state.chat_history.append({"user": user_input})
+        # Display user message
+        st.chat_message("user").write(user_input)
 
-            # Display user message
-            st.chat_message("user").write(user_input)
+        # Generate response
+        with st.spinner(f"{selected_type} is thinking..."):
+            response = simulate_mbti_response(selected_type, user_input)
 
-            # Generate response
-            with st.spinner(f"{selected_type} is thinking..."):
-                response = simulate_mbti_response(selected_type, user_input)
+        # Add response to history
+        st.session_state.chat_history.append({"response": {selected_type: response}})
 
-            # Add response to history
-            st.session_state.chat_history.append({"response": {selected_type: response}})
+        # Display response
+        with st.chat_message("assistant", avatar=MBTI_AVATARS[selected_type]):
+            st.write(response)
 
-            # Display response
-            with st.chat_message("assistant", avatar=f"{selected_type}"):
-                st.write(response)
-
-            # Force a rerun to update the display
-            st.experimental_rerun()
+        # Force a rerun to update the display
+        st.experimental_rerun()
 
 elif chat_mode == "Multi-Personality Chat":
     # Multi-chat interface
     st.subheader("Multi-Personality Chat")
 
     # Settings
-    col1, col2 = st.columns(2)
-    with col1:
-        num_personalities = st.slider("Number of personalities", 2, 8, 3)
-    with col2:
-        selected_types = st.multiselect(
-            "Select specific types (optional)",
-            MBTI_TYPES,
-            format_func=lambda x: f"{x} - {get_type_nickname(x)}"
-        )
+    num_personalities = st.slider("Number of personalities", 2, 8, 3)
+    selected_types = st.multiselect(
+        "Select specific types (optional)",
+        MBTI_TYPES,
+        format_func=lambda x: f"{x} - {get_type_nickname(x)}"
+    )
 
     # Display chat history
     for message in st.session_state.chat_history:
@@ -220,15 +224,15 @@ elif chat_mode == "Multi-Personality Chat":
 
         if "response" in message and isinstance(message["response"], dict):
             for mbti_type, resp in message["response"].items():
-                with st.chat_message("assistant", avatar=f"{mbti_type}"):
+                with st.chat_message("assistant", avatar=MBTI_AVATARS[mbti_type]):
                     st.write(f"**{mbti_type}** - {get_type_nickname(mbti_type)}: {resp}")
 
-    # User input
+    # User input - must be outside of any container
     user_input = st.chat_input("Ask something...")
 
     if user_input:
         # Add user message
-        if "user" not in st.session_state.chat_history[-1] if st.session_state.chat_history else True:
+        if not st.session_state.chat_history or "user" not in st.session_state.chat_history[-1]:
             st.session_state.chat_history.append({"user": user_input})
 
         # Display user message
@@ -244,7 +248,7 @@ elif chat_mode == "Multi-Personality Chat":
 
         # Display responses
         for mbti_type, response in responses.items():
-            with st.chat_message("assistant", avatar=f"{mbti_type}"):
+            with st.chat_message("assistant", avatar=MBTI_AVATARS[mbti_type]):
                 st.write(f"**{mbti_type}** - {get_type_nickname(mbti_type)}: {response}")
 
         # Force a rerun to update the display
@@ -254,19 +258,14 @@ elif chat_mode == "Group Discussion":
     st.subheader("MBTI Group Discussion")
 
     # Discussion settings
-    col1, col2 = st.columns(2)
-
-    with col1:
-        topic = st.text_input("Discussion Topic", "The future of artificial intelligence")
-        num_participants = st.slider("Number of participants", 2, 8, 4)
-
-    with col2:
-        selected_participants = st.multiselect(
-            "Select specific participants (optional)",
-            MBTI_TYPES,
-            format_func=lambda x: f"{x} - {get_type_nickname(x)}"
-        )
-        num_rounds = st.slider("Discussion rounds", 1, 5, 3)
+    topic = st.text_input("Discussion Topic", "The future of artificial intelligence")
+    num_participants = st.slider("Number of participants", 2, 8, 4)
+    selected_participants = st.multiselect(
+        "Select specific participants (optional)",
+        MBTI_TYPES,
+        format_func=lambda x: f"{x} - {get_type_nickname(x)}"
+    )
+    num_rounds = st.slider("Discussion rounds", 1, 5, 3)
 
     # Start discussion button
     if st.button("Start New Discussion"):
@@ -312,7 +311,7 @@ elif chat_mode == "Group Discussion":
             st.experimental_rerun()
 
     # Display current discussion
-    if "current_discussion" in st.session_state:
+    if st.session_state.current_discussion:
         st.info(st.session_state.current_discussion[0])
 
         for entry in st.session_state.current_discussion[1:]:
@@ -325,11 +324,11 @@ elif chat_mode == "Group Discussion":
                 if "Round" in mbti_part:
                     mbti_type = mbti_part.split()[0]
                     round_info = mbti_part.split("(")[1].split(")")[0]
-                    with st.chat_message("assistant", avatar=f"{mbti_type}"):
+                    with st.chat_message("assistant", avatar=MBTI_AVATARS[mbti_type]):
                         st.write(f"**{mbti_type}** - {get_type_nickname(mbti_type)} ({round_info}): {content}")
                 else:
                     mbti_type = mbti_part
-                    with st.chat_message("assistant", avatar=f"{mbti_type}"):
+                    with st.chat_message("assistant", avatar=MBTI_AVATARS[mbti_type]):
                         st.write(f"**{mbti_type}** - {get_type_nickname(mbti_type)}: {content}")
 
 # Add a footer
@@ -348,7 +347,7 @@ st.markdown(
 st.sidebar.markdown("---")
 st.sidebar.info("""
 **Note:** This is a demo version with simulated responses. 
-The full version uses:
+The full version would use:
 - Weaviate vector database
 - LlamaIndex for retrieval
 - OpenAI for natural responses
