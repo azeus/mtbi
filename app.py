@@ -1,5 +1,22 @@
+# app.py
+
 import streamlit as st
 import random
+import time
+import os
+from utils import MBTI_TYPES, MBTI_AVATARS, get_type_nickname, get_type_description, get_type_cognitive_functions, \
+    simulate_mbti_response
+
+# Optional imports - will be used if files exist
+try:
+    from weaviate_connection import get_weaviate_client
+    from schema_setup import create_mbti_schema
+    from data_import import initialize_data
+    from mbti_chat import MBTIMultiChat
+
+    ADVANCED_MODE = True
+except ImportError:
+    ADVANCED_MODE = False
 
 # Page configuration
 st.set_page_config(
@@ -17,125 +34,59 @@ Experience how different personality types might respond to the same questions!
 """)
 
 # Initialize session state
+if 'chat_initialized' not in st.session_state:
+    st.session_state.chat_initialized = False
+
 if 'chat_history' not in st.session_state:
     st.session_state.chat_history = []
 
 if 'current_discussion' not in st.session_state:
     st.session_state.current_discussion = None
 
-# Define MBTI types and functions
-MBTI_TYPES = [
-    "INTJ", "INTP", "ENTJ", "ENTP",
-    "INFJ", "INFP", "ENFJ", "ENFP",
-    "ISTJ", "ISFJ", "ESTJ", "ESFJ",
-    "ISTP", "ISFP", "ESTP", "ESFP"
-]
-
-# Map MBTI types to emoji avatars
-MBTI_AVATARS = {
-    "INTJ": "🧠", "INTP": "🔬", "ENTJ": "👑", "ENTP": "💡",
-    "INFJ": "🔮", "INFP": "🌈", "ENFJ": "🌟", "ENFP": "✨",
-    "ISTJ": "📊", "ISFJ": "🏡", "ESTJ": "📝", "ESFJ": "🤝",
-    "ISTP": "🛠️", "ISFP": "🎨", "ESTP": "🏄", "ESFP": "🎭"
-}
+if 'debug_mode' not in st.session_state:
+    st.session_state.debug_mode = False
 
 
-def get_type_nickname(mbti_type):
-    """Get the nickname for an MBTI type."""
-    nicknames = {
-        "INTJ": "The Architect",
-        "INTP": "The Logician",
-        "ENTJ": "The Commander",
-        "ENTP": "The Debater",
-        "INFJ": "The Advocate",
-        "INFP": "The Mediator",
-        "ENFJ": "The Protagonist",
-        "ENFP": "The Campaigner",
-        "ISTJ": "The Inspector",
-        "ISFJ": "The Defender",
-        "ESTJ": "The Executive",
-        "ESFJ": "The Consul",
-        "ISTP": "The Virtuoso",
-        "ISFP": "The Artist",
-        "ESTP": "The Entrepreneur",
-        "ESFP": "The Entertainer"
-    }
-    return nicknames.get(mbti_type, "")
+# Debug logging function
+def debug_log(message):
+    if st.session_state.debug_mode:
+        st.sidebar.text(f"[DEBUG] {message}")
 
 
-def get_type_description(mbti_type):
-    """Get a short description for an MBTI type."""
-    descriptions = {
-        "INTJ": "Strategic, independent thinkers with a focus on systems and innovation.",
-        "INTP": "Logical, analytical minds that enjoy theoretical concepts and possibilities.",
-        "ENTJ": "Decisive leaders who organize people and resources to achieve objectives.",
-        "ENTP": "Quick-thinking debaters who enjoy intellectual challenges and possibilities.",
-        "INFJ": "Insightful, principled individuals with a focus on helping others and society.",
-        "INFP": "Idealistic, authentic individuals who value harmony and personal growth.",
-        "ENFJ": "Charismatic leaders who inspire others and facilitate personal development.",
-        "ENFP": "Enthusiastic, creative people who see possibilities in everything and everyone.",
-        "ISTJ": "Practical, detail-oriented individuals who value tradition and responsibility.",
-        "ISFJ": "Loyal, compassionate people who protect and support those they care about.",
-        "ESTJ": "Organized, efficient managers who ensure systems and people operate effectively.",
-        "ESFJ": "Warm, sociable people who create harmony and take care of practical needs.",
-        "ISTP": "Hands-on problem solvers who excel in understanding how things work.",
-        "ISFP": "Gentle, artistic souls who live in the moment and value aesthetic experiences.",
-        "ESTP": "Energetic, practical people who thrive in dynamic situations and love action.",
-        "ESFP": "Spontaneous, fun-loving performers who bring joy and energy to others."
-    }
-    return descriptions.get(mbti_type, "")
+# Setup and initialization
+def initialize_app():
+    if ADVANCED_MODE:
+        with st.spinner("Setting up Weaviate connection..."):
+            client = get_weaviate_client()
+
+        if client is not None:
+            debug_log("Weaviate connection successful")
+            with st.spinner("Setting up database schema..."):
+                create_mbti_schema()
+
+            with st.spinner("Initializing MBTI data..."):
+                initialize_data()
+
+            with st.spinner("Setting up chat system..."):
+                st.session_state.mbti_chat = MBTIMultiChat(client)
+                st.session_state.chat_initialized = True
+
+            st.success("Setup complete! You can now chat with MBTI personalities.")
+        else:
+            debug_log("Weaviate connection failed")
+            st.warning("Weaviate connection failed. Using simulation mode instead.")
+            st.session_state.mbti_chat = None
+            st.session_state.chat_initialized = True
+    else:
+        debug_log("Advanced mode not available, using simulation")
+        st.info("Running in simulation mode (no Weaviate/LlamaIndex)")
+        st.session_state.mbti_chat = None
+        st.session_state.chat_initialized = True
 
 
-def get_type_cognitive_functions(mbti_type):
-    """Get the cognitive functions for an MBTI type."""
-    functions = {
-        "INTJ": "Ni-Te-Fi-Se (Introverted Intuition, Extraverted Thinking, Introverted Feeling, Extraverted Sensing)",
-        "INTP": "Ti-Ne-Si-Fe (Introverted Thinking, Extraverted Intuition, Introverted Sensing, Extraverted Feeling)",
-        "ENTJ": "Te-Ni-Se-Fi (Extraverted Thinking, Introverted Intuition, Extraverted Sensing, Introverted Feeling)",
-        "ENTP": "Ne-Ti-Fe-Si (Extraverted Intuition, Introverted Thinking, Extraverted Feeling, Introverted Sensing)",
-        "INFJ": "Ni-Fe-Ti-Se (Introverted Intuition, Extraverted Feeling, Introverted Thinking, Extraverted Sensing)",
-        "INFP": "Fi-Ne-Si-Te (Introverted Feeling, Extraverted Intuition, Introverted Sensing, Extraverted Thinking)",
-        "ENFJ": "Fe-Ni-Se-Ti (Extraverted Feeling, Introverted Intuition, Extraverted Sensing, Introverted Thinking)",
-        "ENFP": "Ne-Fi-Te-Si (Extraverted Intuition, Introverted Feeling, Extraverted Thinking, Introverted Sensing)",
-        "ISTJ": "Si-Te-Fi-Ne (Introverted Sensing, Extraverted Thinking, Introverted Feeling, Extraverted Intuition)",
-        "ISFJ": "Si-Fe-Ti-Ne (Introverted Sensing, Extraverted Feeling, Introverted Thinking, Extraverted Intuition)",
-        "ESTJ": "Te-Si-Ne-Fi (Extraverted Thinking, Introverted Sensing, Extraverted Intuition, Introverted Feeling)",
-        "ESFJ": "Fe-Si-Ne-Ti (Extraverted Feeling, Introverted Sensing, Extraverted Intuition, Introverted Thinking)",
-        "ISTP": "Ti-Se-Ni-Fe (Introverted Thinking, Extraverted Sensing, Introverted Intuition, Extraverted Feeling)",
-        "ISFP": "Fi-Se-Ni-Te (Introverted Feeling, Extraverted Sensing, Introverted Intuition, Extraverted Thinking)",
-        "ESTP": "Se-Ti-Fe-Ni (Extraverted Sensing, Introverted Thinking, Extraverted Feeling, Introverted Intuition)",
-        "ESFP": "Se-Fi-Te-Ni (Extraverted Sensing, Introverted Feeling, Extraverted Thinking, Introverted Intuition)"
-    }
-    return functions.get(mbti_type, "")
-
-
-def simulate_mbti_response(mbti_type, user_query):
-    """
-    Simulate a response from a specific MBTI type.
-    This is a simplified mock function - in the full version, this would use LLM + Weaviate.
-    """
-    # Simple responses based on MBTI type
-    responses = {
-        "INTJ": f"As an architect, I see this from a strategic perspective. {user_query}? This requires careful analysis of systems and long-term implications.",
-        "INTP": f"Interesting question about '{user_query}'. Let me analyze the logical framework behind this concept...",
-        "ENTJ": f"Let's address '{user_query}' efficiently. Here's my executive assessment and plan of action...",
-        "ENTP": f"'{user_query}'? That's a fascinating topic with multiple possibilities! Have you considered these perspectives?",
-        "INFJ": f"I sense there's deeper meaning behind your question about '{user_query}'. Let me share my insights...",
-        "INFP": f"Your question about '{user_query}' resonates with my values. Here's my authentic perspective...",
-        "ENFJ": f"I appreciate you asking about '{user_query}'. Let me guide you through my thoughts while considering how this impacts everyone...",
-        "ENFP": f"Oh, '{user_query}'! That opens up so many exciting possibilities! Let's explore this together!",
-        "ISTJ": f"Regarding '{user_query}', here are the concrete facts and reliable information based on experience...",
-        "ISFJ": f"I care about how '{user_query}' affects people. Based on what's worked before, here's my thoughtful response...",
-        "ESTJ": f"Let's be practical about '{user_query}'. The most efficient approach based on established procedures is...",
-        "ESFJ": f"I want to help with your question about '{user_query}'. Here's what will work best for everyone involved...",
-        "ISTP": f"Let me troubleshoot '{user_query}' by breaking it down into its practical components...",
-        "ISFP": f"'{user_query}' makes me feel... Here's my personal, in-the-moment response that feels right...",
-        "ESTP": f"Let's take action on '{user_query}'! Here's my straightforward, pragmatic approach based on what's happening now...",
-        "ESFP": f"'{user_query}'? How fun! Here's my enthusiastic take that brings energy to this conversation..."
-    }
-
-    return responses.get(mbti_type, f"Thinking about {user_query}...")
-
+# Initialize the app if not already done
+if not st.session_state.chat_initialized:
+    initialize_app()
 
 # Sidebar options
 st.sidebar.image(
@@ -148,12 +99,147 @@ chat_mode = st.sidebar.radio(
     ["Single Personality", "Multi-Personality Chat", "Group Discussion"]
 )
 
+# System Status Dashboard
+with st.sidebar.expander("System Status", expanded=False):
+    if st.button("Run Diagnostics"):
+        # Check Weaviate
+        with st.spinner("Checking Weaviate..."):
+            if ADVANCED_MODE:
+                client = get_weaviate_client()
+                if client is not None and hasattr(client, 'is_ready') and client.is_ready():
+                    st.success("✅ Weaviate: Connected")
+                    # Show additional cluster info
+                    try:
+                        meta = client.get_meta()
+                        st.info(f"Weaviate version: {meta['version']}")
+                    except:
+                        pass
+                else:
+                    st.error("❌ Weaviate: Not connected")
+            else:
+                st.warning("⚠️ Weaviate: Module not available")
+
+        # Check OpenAI
+        with st.spinner("Checking OpenAI..."):
+            try:
+                from openai import OpenAI
+
+                openai_api_key = None
+                if hasattr(st, 'secrets') and 'OPENAI_API_KEY' in st.secrets:
+                    openai_api_key = st.secrets['OPENAI_API_KEY']
+                else:
+                    openai_api_key = os.getenv("OPENAI_API_KEY")
+
+                if openai_api_key:
+                    openai_client = OpenAI(api_key=openai_api_key)
+                    response = openai_client.chat.completions.create(
+                        model="gpt-3.5-turbo",
+                        messages=[{"role": "user", "content": "test"}],
+                        max_tokens=5
+                    )
+                    st.success("✅ OpenAI API: Connected")
+                else:
+                    st.error("❌ OpenAI API: Missing API key")
+            except Exception as e:
+                st.error(f"❌ OpenAI API: Error - {str(e)}")
+
+        # Check MBTI Data
+        if ADVANCED_MODE and 'client' in locals() and client is not None:
+            with st.spinner("Checking MBTI data..."):
+                try:
+                    result = client.query.aggregate("MBTIPersonality").with_meta_count().do()
+                    count = result.get('data', {}).get('Aggregate', {}).get('MBTIPersonality', [{}])[0].get('meta',
+                                                                                                            {}).get(
+                        'count', 0)
+                    if count > 0:
+                        st.success(f"✅ MBTI Data: {count} objects")
+                        # Show sample types
+                        types_result = client.query.get("MBTIPersonality", ["type"]).with_limit(100).do()
+                        types = list(set([obj.get('type') for obj in
+                                          types_result.get('data', {}).get('Get', {}).get('MBTIPersonality', [])]))
+                        st.info(f"👤 Types found: {', '.join(types)}")
+                    else:
+                        st.warning("⚠️ MBTI Data: No data found")
+                except Exception as e:
+                    st.error(f"❌ MBTI Data: Error - {str(e)}")
+
+    # Debug Mode Toggle
+    st.session_state.debug_mode = st.checkbox("Enable Debug Logs", value=st.session_state.debug_mode)
+
 # Display connection status
 st.sidebar.markdown("---")
-if hasattr(st, 'secrets') and 'WEAVIATE_URL' in st.secrets:
-    st.sidebar.success("✅ Credentials configured")
+if ADVANCED_MODE:
+    if hasattr(st, 'secrets') and 'WEAVIATE_URL' in st.secrets:
+        st.sidebar.success("✅ Credentials configured")
+    else:
+        st.sidebar.warning("⚠️ Weaviate credentials not configured")
 else:
-    st.sidebar.warning("⚠️ Weaviate credentials not configured")
+    st.sidebar.info("💡 Basic simulation mode active")
+
+
+# Simple chat functions for when not using LlamaIndex/Weaviate
+def simple_chat_with_type(user_query, mbti_type):
+    debug_log(f"Simulating response for {mbti_type}")
+    response = simulate_mbti_response(mbti_type, user_query)
+    return response
+
+
+def simple_multi_chat(user_query, types_to_include=None, num_types=3):
+    # Determine which types to include
+    if types_to_include:
+        selected_types = [t for t in types_to_include if t in MBTI_TYPES]
+        if not selected_types:
+            selected_types = random.sample(MBTI_TYPES, min(num_types, len(MBTI_TYPES)))
+    else:
+        selected_types = random.sample(MBTI_TYPES, min(num_types, len(MBTI_TYPES)))
+
+    debug_log(f"Simulating responses for {', '.join(selected_types)}")
+
+    # Get responses
+    responses = {}
+    for mbti_type in selected_types:
+        response = simple_chat_with_type(user_query, mbti_type)
+        responses[mbti_type] = response
+
+    return responses
+
+
+def simple_group_discussion(topic, participants=None, num_rounds=3):
+    if not participants:
+        participants = random.sample(MBTI_TYPES, min(4, len(MBTI_TYPES)))
+
+    debug_log(f"Starting simulated group discussion with {', '.join(participants)}")
+
+    discussion = [f"Group discussion on: {topic}\nParticipants: {', '.join(participants)}"]
+
+    # First round - everyone responds to the topic
+    round_responses = {}
+    for mbti_type in participants:
+        response = simple_chat_with_type(topic, mbti_type)
+        round_responses[mbti_type] = response
+        discussion.append(f"{mbti_type}: {response}")
+
+    # Additional rounds - respond to others
+    for round_num in range(2, num_rounds + 1):
+        new_responses = {}
+        debug_log(f"Starting discussion round {round_num}")
+
+        for mbti_type in participants:
+            # Create context from previous responses
+            context = "\n".join([
+                f"{other_type}: {round_responses[other_type]}"
+                for other_type in participants if other_type != mbti_type
+            ])
+
+            prompt = f"Topic: {topic}\n\nOthers' comments:\n{context}"
+            response = simple_chat_with_type(prompt, mbti_type)
+            new_responses[mbti_type] = response
+            discussion.append(f"{mbti_type} (Round {round_num}): {response}")
+
+        round_responses = new_responses
+
+    return discussion
+
 
 # Different UI based on selected mode
 if chat_mode == "Single Personality":
@@ -184,6 +270,7 @@ if chat_mode == "Single Personality":
     user_input = st.chat_input("Ask something...")
 
     if user_input:
+        debug_log(f"User input: {user_input}")
         # Add user message to history
         if not st.session_state.chat_history or "user" not in st.session_state.chat_history[-1]:
             st.session_state.chat_history.append({"user": user_input})
@@ -193,7 +280,16 @@ if chat_mode == "Single Personality":
 
         # Generate response
         with st.spinner(f"{selected_type} is thinking..."):
-            response = simulate_mbti_response(selected_type, user_input)
+            if st.session_state.mbti_chat is not None:
+                try:
+                    debug_log(f"Using MBTIMultiChat for {selected_type}")
+                    response = st.session_state.mbti_chat.chat_with_type(user_input, selected_type)
+                except Exception as e:
+                    debug_log(f"Error with MBTIMultiChat: {str(e)}")
+                    st.warning(f"Error getting response from advanced system. Falling back to simulation.")
+                    response = simple_chat_with_type(user_input, selected_type)
+            else:
+                response = simple_chat_with_type(user_input, selected_type)
 
         # Add response to history
         st.session_state.chat_history.append({"response": {selected_type: response}})
@@ -231,6 +327,7 @@ elif chat_mode == "Multi-Personality Chat":
     user_input = st.chat_input("Ask something...")
 
     if user_input:
+        debug_log(f"User input (multi-chat): {user_input}")
         # Add user message
         if not st.session_state.chat_history or "user" not in st.session_state.chat_history[-1]:
             st.session_state.chat_history.append({"user": user_input})
@@ -240,8 +337,28 @@ elif chat_mode == "Multi-Personality Chat":
 
         # Get responses from multiple personalities
         with st.spinner("Multiple personalities are responding..."):
-            types_to_use = selected_types if selected_types else random.sample(MBTI_TYPES, num_personalities)
-            responses = {mbti_type: simulate_mbti_response(mbti_type, user_input) for mbti_type in types_to_use}
+            if st.session_state.mbti_chat is not None:
+                try:
+                    debug_log("Using MBTIMultiChat for multi-chat")
+                    responses = st.session_state.mbti_chat.multi_chat(
+                        user_input,
+                        types_to_include=selected_types if selected_types else None,
+                        num_types=num_personalities
+                    )
+                except Exception as e:
+                    debug_log(f"Error with MBTIMultiChat multi-chat: {str(e)}")
+                    st.warning(f"Error getting responses from advanced system. Falling back to simulation.")
+                    responses = simple_multi_chat(
+                        user_input,
+                        types_to_include=selected_types if selected_types else None,
+                        num_types=num_personalities
+                    )
+            else:
+                responses = simple_multi_chat(
+                    user_input,
+                    types_to_include=selected_types if selected_types else None,
+                    num_types=num_personalities
+                )
 
         # Add responses to history
         st.session_state.chat_history.append({"response": responses})
@@ -272,37 +389,35 @@ elif chat_mode == "Group Discussion":
         if not topic:
             st.error("Please enter a discussion topic")
         else:
+            debug_log(f"Starting group discussion on: {topic}")
             with st.spinner("Discussion in progress... This may take a minute."):
                 # Select participants
                 participants = selected_participants if selected_participants else random.sample(MBTI_TYPES,
                                                                                                  num_participants)
 
-                # Initialize discussion
-                discussion = [f"Group discussion on: {topic}\nParticipants: {', '.join(participants)}"]
-
-                # First round
-                round_responses = {}
-                for mbti_type in participants:
-                    response = simulate_mbti_response(mbti_type, topic)
-                    round_responses[mbti_type] = response
-                    discussion.append(f"{mbti_type}: {response}")
-
-                # Additional rounds
-                for round_num in range(2, num_rounds + 1):
-                    new_responses = {}
-
-                    for mbti_type in participants:
-                        context = "\n".join([
-                            f"{other_type}: {round_responses[other_type]}"
-                            for other_type in participants if other_type != mbti_type
-                        ])
-
-                        prompt = f"Topic: {topic}\n\nOthers' comments:\n{context}"
-                        response = simulate_mbti_response(mbti_type, prompt)
-                        new_responses[mbti_type] = response
-                        discussion.append(f"{mbti_type} (Round {round_num}): {response}")
-
-                    round_responses = new_responses
+                # Generate discussion
+                if st.session_state.mbti_chat is not None:
+                    try:
+                        debug_log(f"Using MBTIMultiChat for group discussion with {len(participants)} participants")
+                        discussion = st.session_state.mbti_chat.group_discussion(
+                            topic,
+                            participants,
+                            num_rounds
+                        )
+                    except Exception as e:
+                        debug_log(f"Error with MBTIMultiChat group discussion: {str(e)}")
+                        st.warning(f"Error generating discussion with advanced system. Falling back to simulation.")
+                        discussion = simple_group_discussion(
+                            topic,
+                            participants,
+                            num_rounds
+                        )
+                else:
+                    discussion = simple_group_discussion(
+                        topic,
+                        participants,
+                        num_rounds
+                    )
 
                 # Store in session state
                 st.session_state.current_discussion = discussion
@@ -343,12 +458,22 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# Show a note about the full version
+# Show a note about the mode
 st.sidebar.markdown("---")
-st.sidebar.info("""
-**Note:** This is a demo version with simulated responses. 
-The full version would use:
-- Weaviate vector database
-- LlamaIndex for retrieval
-- OpenAI for natural responses
-""")
+if st.session_state.mbti_chat is not None and hasattr(st.session_state.mbti_chat,
+                                                      'use_llm') and st.session_state.mbti_chat.use_llm:
+    st.sidebar.success("""
+    **Advanced Mode Active**
+    Using:
+    - Weaviate vector database
+    - LlamaIndex for retrieval
+    - OpenAI for natural responses
+    """)
+else:
+    st.sidebar.info("""
+    **Simulation Mode Active**
+    The full version would use:
+    - Weaviate vector database
+    - LlamaIndex for retrieval
+    - OpenAI for natural responses
+    """)
