@@ -6,7 +6,6 @@ import time
 import os
 from utils import MBTI_TYPES, MBTI_AVATARS, get_type_nickname, get_type_description, get_type_cognitive_functions, \
     simulate_mbti_response
-from diagnostics import run_comprehensive_diagnostics, display_diagnostics_results, show_setup_guide
 
 
 # Optional imports - will be used if files exist
