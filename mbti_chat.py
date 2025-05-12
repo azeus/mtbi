@@ -1,5 +1,5 @@
-# mbti_chat.py
-# Fixed import issues with LlamaIndex
+# mbti_chat_updated.py
+# Updated for newer LlamaIndex versions (0.10.x+)
 
 import os
 import streamlit as st
@@ -8,22 +8,17 @@ import random
 
 # Import LlamaIndex components
 try:
-    # First try to import necessary types for type hints
-    from typing import TYPE_CHECKING
-
-    if TYPE_CHECKING:
-        from llama_index.core.retrievers import BaseRetriever
-
-    # Import the actual components
-    from llama_index.core import StorageContext, load_index_from_storage
-    from llama_index.vector_stores.weaviate import WeaviateVectorStore
-    from llama_index.core.schema import NodeWithScore, TextNode
+    # Import the core components
+    from llama_index.core import VectorStoreIndex
     from llama_index.core.retrievers import VectorIndexRetriever
-    from llama_index.core.retrievers.base import BaseRetriever  # Fixed import
-    from llama_index.llms.openai import OpenAI
     from llama_index.core.query_engine import RetrieverQueryEngine
     from llama_index.core.response_synthesizers import ResponseSynthesizer
-    from llama_index.core.indices.vector_store import VectorStoreIndex
+
+    # Import the vector store for Weaviate
+    from llama_index.vector_stores.weaviate import WeaviateVectorStore
+
+    # Import the OpenAI LLM
+    from llama_index.llms.openai import OpenAI
 
     LLAMA_INDEX_AVAILABLE = True
 except ImportError as e:
@@ -35,7 +30,7 @@ except ImportError as e:
 class MBTIMultiChat:
     """
     A class for chatting with different MBTI personality types.
-    Can use LlamaIndex and OpenAI for advanced responses.
+    Updated for newer LlamaIndex versions.
     """
 
     def __init__(self, weaviate_client=None):
@@ -147,6 +142,7 @@ class MBTIMultiChat:
 
                     How would an {mbti_type} personality type respond to this? 
                     Consider their cognitive functions, core values, and communication style.
+                    Make your response sound like a casual friend, not an analysis.
                     """
 
                     # Create response synthesizer
@@ -165,7 +161,7 @@ class MBTIMultiChat:
                     response = query_engine.query(personalized_query)
 
                     # Post-process to make it more conversational
-                    final_response = self._format_ai_response(response.response, mbti_type)
+                    final_response = self._format_ai_response(str(response), mbti_type)
 
                     return final_response
 
@@ -174,9 +170,78 @@ class MBTIMultiChat:
                     st.sidebar.error(f"Error generating response with LlamaIndex: {str(e)}")
                 # Fall back to simulation if there's an error
 
+        # If we can't use LlamaIndex, try using pure OpenAI
+        try:
+            from openai import OpenAI
+
+            # Get API key
+            openai_api_key = None
+            if hasattr(st, 'secrets') and 'OPENAI_API_KEY' in st.secrets:
+                openai_api_key = st.secrets['OPENAI_API_KEY']
+            else:
+                openai_api_key = os.getenv("OPENAI_API_KEY")
+
+            if openai_api_key:
+                openai_client = OpenAI(api_key=openai_api_key)
+
+                # Get MBTI type information
+                type_info = self._get_type_info(mbti_type)
+
+                # Create a prompt for OpenAI
+                system_prompt = f"""
+                You are simulating an {mbti_type} personality type from Myers-Briggs Type Indicator.
+
+                {mbti_type} personalities are {type_info}.
+
+                Respond as if you are this personality type, expressing their natural style:
+                - Use vocabulary and expressions typical for this type
+                - Make it feel like a casual conversation with a friend, not a formal analysis
+                - Do NOT mention that you are roleplaying or simulating a personality
+                """
+
+                # Get response from OpenAI
+                response = openai_client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_query}
+                    ],
+                    temperature=0.7,
+                    max_tokens=300
+                )
+
+                # Extract and format the response
+                ai_response = response.choices[0].message.content.strip()
+                return self._format_ai_response(ai_response, mbti_type)
+        except Exception as e:
+            if st.session_state.get('debug_mode', False):
+                st.sidebar.error(f"Error using direct OpenAI: {str(e)}")
+
         # Fallback to simulation
         from utils import simulate_mbti_response
         return simulate_mbti_response(mbti_type, user_query)
+
+    def _get_type_info(self, mbti_type: str) -> str:
+        """Get a description of the MBTI type for the prompt."""
+        descriptions = {
+            "INTJ": "strategic, analytical, and independent with a focus on long-term plans and systems thinking",
+            "INTP": "logical, theoretical, and objective with a focus on analyzing concepts and solving complex problems",
+            "ENTJ": "decisive, organized, and efficient with a focus on leadership and achieving goals",
+            "ENTP": "innovative, debating, and curious with a focus on exploring possibilities and challenging ideas",
+            "INFJ": "insightful, idealistic, and empathetic with a focus on connecting with others and finding meaning",
+            "INFP": "compassionate, creative, and authentic with a focus on personal values and helping others",
+            "ENFJ": "charismatic, supportive, and inspirational with a focus on bringing out the best in people",
+            "ENFP": "enthusiastic, creative, and people-oriented with a focus on possibilities and connections",
+            "ISTJ": "practical, reliable, and detail-oriented with a focus on responsibility and tradition",
+            "ISFJ": "nurturing, detailed, and loyal with a focus on supporting others and maintaining harmony",
+            "ESTJ": "organized, practical, and direct with a focus on getting things done efficiently",
+            "ESFJ": "warm, social, and conscientious with a focus on caring for others and maintaining harmony",
+            "ISTP": "pragmatic, logical, and adaptable with a focus on understanding systems and solving problems",
+            "ISFP": "sensitive, creative, and present-oriented with a focus on aesthetic experiences and authenticity",
+            "ESTP": "energetic, practical, and adaptable with a focus on immediate experiences and problem-solving",
+            "ESFP": "spontaneous, enthusiastic, and social with a focus on enjoying life and bringing joy to others"
+        }
+        return descriptions.get(mbti_type, "unique and interesting")
 
     def _format_ai_response(self, response: str, mbti_type: str) -> str:
         """
