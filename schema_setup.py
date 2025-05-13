@@ -1,13 +1,15 @@
-# schema_setup.py
+# schema_setup_v4.py
+# Updated for Weaviate Client v4 API
 
 import streamlit as st
-from weaviate_connection import get_weaviate_client
+from weaviate_connection_v4 import get_weaviate_client
 
 
 def create_mbti_schema():
     """
     Create the MBTI personality schema in Weaviate.
     Only creates the schema if it doesn't already exist.
+    Updated for Weaviate Client v4.
     """
     # Get Weaviate client
     client = get_weaviate_client()
@@ -73,18 +75,22 @@ def create_mbti_schema():
 
     # Check if schema exists and create if needed
     try:
-        client.schema.get("MBTIPersonality")
-        st.info("Schema 'MBTIPersonality' already exists")
-        return True
-    except:
-        # Create schema
-        try:
+        # Check if class exists using v4 API
+        schema = client.schema.get()
+        class_names = [cls.get('class') for cls in schema.get('classes', [])]
+
+        if "MBTIPersonality" in class_names:
+            st.info("Schema 'MBTIPersonality' already exists")
+            return True
+        else:
+            # Create schema with v4 API
             client.schema.create_class(mbti_schema)
             st.success("Schema 'MBTIPersonality' created successfully")
             return True
-        except Exception as e:
-            st.error(f"Error creating schema: {str(e)}")
-            return False
+
+    except Exception as e:
+        st.error(f"Error creating schema: {str(e)}")
+        return False
 
 
 if __name__ == "__main__":
