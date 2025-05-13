@@ -38,6 +38,14 @@ else:
             except ImportError as e:
                 st.warning(f"⚠️ Failed to import `mbti_chat`: {e}")
 
+try:
+    from llama_integration import check_llama_connection
+    LLAMA_CLOUD_AVAILABLE = True
+except ImportError:
+    LLAMA_CLOUD_AVAILABLE = False
+    st.warning("⚠️ Failed to import `llama_integration`. Llama Cloud features will be unavailable.")
+
+
 
 
 # App title and description
@@ -159,6 +167,15 @@ with st.sidebar.expander("System Status", expanded=False):
             except Exception as e:
                 st.error(f"❌ OpenAI API: Error - {str(e)}")
 
+        with st.spinner("Checking Llama Cloud..."):
+            if LLAMA_CLOUD_AVAILABLE:
+                if check_llama_connection():
+                    st.success("✅ Llama Cloud API: Connected")
+                else:
+                    st.error("❌ Llama Cloud API: Not connected or missing API key")
+            else:
+                st.warning("⚠️ Llama Cloud API: Module not available")
+
         # Check MBTI Data
         if ADVANCED_MODE and 'client' in locals() and client is not None:
             with st.spinner("Checking MBTI data..."):
@@ -185,13 +202,15 @@ with st.sidebar.expander("System Status", expanded=False):
 # Display connection status
 st.sidebar.markdown("---")
 if ADVANCED_MODE:
-    if hasattr(st, 'secrets') and 'WEAVIATE_URL' in st.secrets:
-        st.sidebar.success("✅ Credentials configured")
+    if hasattr(st, 'secrets') and 'WEAVIATE_URL' in st.secrets and 'OPENAI_API_KEY' in st.secrets:
+        if hasattr(st, 'secrets') and 'LLAMA_CLOUD_API_KEY' in st.secrets:
+            st.sidebar.success("✅ All credentials configured")
+        else:
+            st.sidebar.warning("⚠️ Weaviate and OpenAI configured, but Llama Cloud API key missing")
     else:
-        st.sidebar.warning("⚠️ Weaviate credentials not configured")
+        st.sidebar.warning("⚠️ Some credentials not configured")
 else:
     st.sidebar.info("💡 Basic simulation mode active")
-
 
 # Simple chat functions for when not using LlamaIndex/Weaviate
 def simple_chat_with_type(user_query, mbti_type):
@@ -476,21 +495,30 @@ st.markdown(
 
 # Show a note about the mode
 st.sidebar.markdown("---")
-if st.session_state.mbti_chat is not None and hasattr(st.session_state.mbti_chat,
-                                                      'use_llm') and st.session_state.mbti_chat.use_llm:
-    st.sidebar.success("""
-    **Advanced Mode Active**
-    Using:
-    - Weaviate vector database
-    - LlamaIndex for retrieval
-    - OpenAI for natural responses
-    """)
-else:
-    st.sidebar.info("""
-    **Simulation Mode Active**
-    The full version would use:
-    - Weaviate vector database
-    - LlamaIndex for retrieval
-    - OpenAI for natural responses
-    """)
+if st.session_state.mbti_chat is not None:
+    if hasattr(st.session_state.mbti_chat, 'use_vector_db') and st.session_state.mbti_chat.use_vector_db:
+        services = []
+        if st.session_state.mbti_chat.use_vector_db:
+            services.append("- Weaviate vector database")
+        if st.session_state.mbti_chat.use_llama:
+            services.append("- Llama Cloud for analytical types")
+        if st.session_state.mbti_chat.use_openai:
+            services.append("- OpenAI for emotional types")
+
+        if services:
+            st.sidebar.success(f"""
+            **Advanced Mode Active**
+            Using:
+            {chr(10).join(services)}
+            """)
+        else:
+            st.sidebar.warning("**Limited functionality in Advanced Mode**")
+    else:
+        st.sidebar.info("""
+        **Simulation Mode Active**
+        The full version would use:
+        - Weaviate vector database
+        - Llama Cloud for analytical types
+        - OpenAI for emotional types
+        """)
 

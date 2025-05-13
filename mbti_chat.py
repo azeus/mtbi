@@ -1,10 +1,15 @@
 # mbti_chat_updated.py
-# Updated for newer LlamaIndex versions (0.10.x+)
+# Updated to use Llama Cloud, OpenAI, and Weaviate together
 
 import os
 import streamlit as st
-from typing import List, Dict, Optional, Any
 import random
+from typing import List, Dict, Optional, Any
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Import LlamaIndex components
 try:
@@ -18,7 +23,7 @@ try:
     from llama_index.vector_stores.weaviate import WeaviateVectorStore
 
     # Import the OpenAI LLM
-    from llama_index.llms.openai import OpenAI
+    from llama_index.llms.openai import OpenAI as LlamaIndexOpenAI
 
     LLAMA_INDEX_AVAILABLE = True
 except ImportError as e:
@@ -26,11 +31,21 @@ except ImportError as e:
         st.sidebar.warning(f"LlamaIndex import error: {str(e)}")
     LLAMA_INDEX_AVAILABLE = False
 
+# Try to import Llama Cloud integration
+try:
+    from llama_integration import generate_llama_response
+
+    LLAMA_CLOUD_AVAILABLE = True
+except ImportError as e:
+    if st.session_state.get('debug_mode', False):
+        st.sidebar.warning(f"Llama Cloud import error: {str(e)}")
+    LLAMA_CLOUD_AVAILABLE = False
+
 
 class MBTIMultiChat:
     """
     A class for chatting with different MBTI personality types.
-    Updated for newer LlamaIndex versions.
+    Integrates Weaviate, OpenAI, and Llama Cloud.
     """
 
     def __init__(self, weaviate_client=None):
@@ -41,13 +56,55 @@ class MBTIMultiChat:
             weaviate_client: Weaviate client for vector storage
         """
         self.client = weaviate_client
-        self.use_llm = False
+        self.use_vector_db = False
+        self.use_openai = False
+        self.use_llama = LLAMA_CLOUD_AVAILABLE
         self.index = None
         self.llm = None
+
+        # Initialize model selection strategy
+        self.model_allocation = self._initialize_model_allocation()
 
         # Try to initialize LlamaIndex components if available
         if LLAMA_INDEX_AVAILABLE and self.client is not None:
             self._setup_llama_index()
+
+    def _initialize_model_allocation(self):
+        """
+        Set up which MBTI types should use which models.
+
+        Returns:
+            dict: Mapping of MBTI types to preferred model
+        """
+        # Group MBTI types by cognitive function preference
+        # Analytical types better handled by Llama, emotional types by OpenAI
+        model_allocation = {
+            # Analytical types - use Llama Cloud
+            "INTJ": "llama",
+            "INTP": "llama",
+            "ENTJ": "llama",
+            "ENTP": "llama",
+            "ISTJ": "llama",
+            "ESTJ": "llama",
+            "ISTP": "llama",
+
+            # Emotional/empathetic types - use OpenAI
+            "INFJ": "openai",
+            "INFP": "openai",
+            "ENFJ": "openai",
+            "ENFP": "openai",
+            "ISFJ": "openai",
+            "ESFJ": "openai",
+            "ISFP": "openai",
+            "ESFP": "openai",
+            "ESTP": "openai"  # Action-oriented but people-focused
+        }
+
+        # If Llama Cloud is not available, default all to OpenAI
+        if not self.use_llama:
+            return {mbti_type: "openai" for mbti_type in model_allocation}
+
+        return model_allocation
 
     def _setup_llama_index(self):
         """Set up LlamaIndex with Weaviate and OpenAI."""
@@ -61,7 +118,7 @@ class MBTIMultiChat:
 
             if not openai_api_key:
                 if st.session_state.get('debug_mode', False):
-                    st.sidebar.warning("OpenAI API key not found. Using simulation mode.")
+                    st.sidebar.warning("OpenAI API key not found. Limited functionality available.")
                 return
 
             # Setup vector store
@@ -76,18 +133,21 @@ class MBTIMultiChat:
             self.index = VectorStoreIndex.from_vector_store(vector_store)
 
             # Initialize LLM
-            self.llm = OpenAI(
+            self.llm = LlamaIndexOpenAI(
                 model="gpt-3.5-turbo",
                 temperature=0.7,
                 api_key=openai_api_key
             )
 
-            self.use_llm = True
+            self.use_vector_db = True
+            self.use_openai = True
+
             if st.session_state.get('debug_mode', False):
                 st.sidebar.success("LlamaIndex initialized successfully with OpenAI")
 
         except Exception as e:
-            self.use_llm = False
+            self.use_vector_db = False
+            self.use_openai = False
             if st.session_state.get('debug_mode', False):
                 st.sidebar.error(f"Error setting up LlamaIndex: {str(e)}")
                 import traceback
@@ -103,7 +163,7 @@ class MBTIMultiChat:
         Returns:
             A retriever configured for the specified MBTI type
         """
-        if not self.use_llm or self.index is None:
+        if not self.use_vector_db or self.index is None:
             return None
 
         # Create metadata filter for the specific MBTI type
@@ -117,109 +177,6 @@ class MBTIMultiChat:
         )
 
         return retriever
-
-    def chat_with_type(self, user_query: str, mbti_type: str) -> str:
-        """
-        Generate a response from a specific MBTI type.
-
-        Args:
-            user_query: User's message
-            mbti_type: MBTI type to respond as
-
-        Returns:
-            Response from the MBTI personality
-        """
-        # Check if we can use LlamaIndex + OpenAI
-        if self.use_llm and self.index is not None and self.llm is not None:
-            try:
-                # Get retriever for this MBTI type
-                retriever = self._get_mbti_retriever(mbti_type)
-
-                if retriever:
-                    # Personalize the query to get type-specific information
-                    personalized_query = f"""
-                    Question: {user_query}
-
-                    How would an {mbti_type} personality type respond to this? 
-                    Consider their cognitive functions, core values, and communication style.
-                    Make your response sound like a casual friend, not an analysis.
-                    """
-
-                    # Create response synthesizer
-                    response_synthesizer = ResponseSynthesizer.from_args(
-                        llm=self.llm,
-                        response_mode="compact"
-                    )
-
-                    # Create query engine
-                    query_engine = RetrieverQueryEngine(
-                        retriever=retriever,
-                        response_synthesizer=response_synthesizer
-                    )
-
-                    # Generate response
-                    response = query_engine.query(personalized_query)
-
-                    # Post-process to make it more conversational
-                    final_response = self._format_ai_response(str(response), mbti_type)
-
-                    return final_response
-
-            except Exception as e:
-                if st.session_state.get('debug_mode', False):
-                    st.sidebar.error(f"Error generating response with LlamaIndex: {str(e)}")
-                # Fall back to simulation if there's an error
-
-        # If we can't use LlamaIndex, try using pure OpenAI
-        try:
-            from openai import OpenAI
-
-            # Get API key
-            openai_api_key = None
-            if hasattr(st, 'secrets') and 'OPENAI_API_KEY' in st.secrets:
-                openai_api_key = st.secrets['OPENAI_API_KEY']
-            else:
-                openai_api_key = os.getenv("OPENAI_API_KEY")
-
-            if openai_api_key:
-                openai_client = OpenAI(api_key=openai_api_key)
-
-                # Get MBTI type information
-                type_info = self._get_type_info(mbti_type)
-
-                # Create a prompt for OpenAI
-                system_prompt = f"""
-                You are simulating an {mbti_type} personality type from Myers-Briggs Type Indicator.
-
-                {mbti_type} personalities are {type_info}.
-
-                Respond as if you are this personality type, expressing their natural style:
-                - Use vocabulary and expressions typical for this type
-                - Make it feel like a casual conversation with a friend, not a formal analysis
-                - Do NOT mention that you are roleplaying or simulating a personality
-                """
-
-                # Get response from OpenAI
-                response = openai_client.chat.completions.create(
-                    model="gpt-3.5-turbo",
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_query}
-                    ],
-                    temperature=0.7,
-                    max_tokens=300
-                )
-
-                # Extract and format the response
-                ai_response = response.choices[0].message.content.strip()
-                return self._format_ai_response(ai_response, mbti_type)
-        except Exception as e:
-            if st.session_state.get('debug_mode', False):
-                st.sidebar.error(f"Error using direct OpenAI: {str(e)}")
-
-        # Fallback to simulation
-        from utils import simulate_mbti_response
-        return simulate_mbti_response(mbti_type, user_query)
 
     def _get_type_info(self, mbti_type: str) -> str:
         """Get a description of the MBTI type for the prompt."""
@@ -282,6 +239,150 @@ class MBTIMultiChat:
                 response += f" {random.choice(emoji_options)}"
 
         return response
+
+    def chat_with_type(self, user_query: str, mbti_type: str) -> str:
+        """
+        Generate a response from a specific MBTI type.
+        Intelligently routes to Llama Cloud or OpenAI based on personality type.
+
+        Args:
+            user_query: User's message
+            mbti_type: MBTI type to respond as
+
+        Returns:
+            Response from the MBTI personality
+        """
+        # Determine which model to use for this MBTI type
+        model_to_use = self.model_allocation.get(mbti_type, "openai")
+
+        if st.session_state.get('debug_mode', False):
+            st.sidebar.info(f"Using {model_to_use} for {mbti_type}")
+
+        # Try the vector DB approach first if available
+        if self.use_vector_db and self.index is not None and self.llm is not None:
+            try:
+                # Get retriever for this MBTI type
+                retriever = self._get_mbti_retriever(mbti_type)
+
+                if retriever:
+                    # Personalize the query to get type-specific information
+                    personalized_query = f"""
+                    Question: {user_query}
+
+                    How would an {mbti_type} personality type respond to this? 
+                    Consider their cognitive functions, core values, and communication style.
+                    Make your response sound like a casual friend, not an analysis.
+                    """
+
+                    # Create response synthesizer
+                    response_synthesizer = ResponseSynthesizer.from_args(
+                        llm=self.llm,
+                        response_mode="compact"
+                    )
+
+                    # Create query engine
+                    query_engine = RetrieverQueryEngine(
+                        retriever=retriever,
+                        response_synthesizer=response_synthesizer
+                    )
+
+                    # Generate response
+                    response = query_engine.query(personalized_query)
+
+                    # Post-process to make it more conversational
+                    final_response = self._format_ai_response(str(response), mbti_type)
+
+                    return final_response
+
+            except Exception as e:
+                if st.session_state.get('debug_mode', False):
+                    st.sidebar.error(f"Error generating response with LlamaIndex: {str(e)}")
+                # Continue to try other methods
+
+        # Try Llama Cloud if it's the preferred model for this type
+        if model_to_use == "llama" and self.use_llama:
+            try:
+                # Get MBTI type information for context
+                type_info = self._get_type_info(mbti_type)
+
+                # Craft a system prompt for Llama
+                system_prompt = f"""
+                You are simulating an {mbti_type} personality type from Myers-Briggs Type Indicator.
+
+                {mbti_type} personalities are {type_info}.
+
+                Respond as if you are this personality type, expressing their natural style:
+                - Use vocabulary and expressions typical for this type
+                - Make it feel like a casual conversation with a friend, not a formal analysis
+                - Do NOT mention that you are roleplaying or simulating a personality
+                """
+
+                # Get response from Llama Cloud
+                response = generate_llama_response(
+                    prompt=user_query,
+                    system_prompt=system_prompt,
+                    model="llama-3-70b-instruct"
+                )
+
+                if response:
+                    return self._format_ai_response(response, mbti_type)
+
+            except Exception as e:
+                if st.session_state.get('debug_mode', False):
+                    st.sidebar.error(f"Error using Llama Cloud: {str(e)}")
+                # Continue to OpenAI fallback
+
+        # Try using pure OpenAI if available
+        if self.use_openai or (model_to_use == "openai"):
+            try:
+                from openai import OpenAI
+
+                # Get API key
+                openai_api_key = None
+                if hasattr(st, 'secrets') and 'OPENAI_API_KEY' in st.secrets:
+                    openai_api_key = st.secrets['OPENAI_API_KEY']
+                else:
+                    openai_api_key = os.getenv("OPENAI_API_KEY")
+
+                if openai_api_key:
+                    openai_client = OpenAI(api_key=openai_api_key)
+
+                    # Get MBTI type information
+                    type_info = self._get_type_info(mbti_type)
+
+                    # Create a prompt for OpenAI
+                    system_prompt = f"""
+                    You are simulating an {mbti_type} personality type from Myers-Briggs Type Indicator.
+
+                    {mbti_type} personalities are {type_info}.
+
+                    Respond as if you are this personality type, expressing their natural style:
+                    - Use vocabulary and expressions typical for this type
+                    - Make it feel like a casual conversation with a friend, not a formal analysis
+                    - Do NOT mention that you are roleplaying or simulating a personality
+                    """
+
+                    # Get response from OpenAI
+                    response = openai_client.chat.completions.create(
+                        model="gpt-3.5-turbo",
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_query}
+                        ],
+                        temperature=0.7,
+                        max_tokens=300
+                    )
+
+                    # Extract and format the response
+                    ai_response = response.choices[0].message.content.strip()
+                    return self._format_ai_response(ai_response, mbti_type)
+            except Exception as e:
+                if st.session_state.get('debug_mode', False):
+                    st.sidebar.error(f"Error using direct OpenAI: {str(e)}")
+
+        # Fallback to simulation
+        from utils import simulate_mbti_response
+        return simulate_mbti_response(mbti_type, user_query)
 
     def multi_chat(
             self,
