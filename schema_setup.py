@@ -2,7 +2,7 @@
 # Updated for Weaviate Client v4 API
 
 import streamlit as st
-from weaviate_connection_v4 import get_weaviate_client
+from weaviate_connection import get_weaviate_client
 
 
 def create_mbti_schema():
